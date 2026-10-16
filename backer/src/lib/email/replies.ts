@@ -8,6 +8,8 @@ export interface IngestedReply {
   investorId: string | null;
   sentiment: string;
   source: "ai" | "keywords";
+  companyId: string;
+  ownerClerkId: string;
 }
 
 /**
@@ -24,7 +26,14 @@ export async function ingestReply(opts: {
 }): Promise<IngestedReply | null> {
   const message = await prisma.emailMessage.findUnique({
     where: { trackToken: opts.trackToken },
-    select: { id: true, updateId: true, investorId: true },
+    select: {
+      id: true,
+      updateId: true,
+      investorId: true,
+      update: {
+        select: { company: { select: { id: true, owner: { select: { clerkId: true } } } } },
+      },
+    },
   });
   if (!message) return null;
 
@@ -64,5 +73,7 @@ export async function ingestReply(opts: {
     investorId: reply.investorId,
     sentiment: reply.sentiment,
     source: sentiment.source,
+    companyId: message.update.company.id,
+    ownerClerkId: message.update.company.owner.clerkId,
   };
 }

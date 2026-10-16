@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
+import { captureEvent } from "@/lib/analytics";
 import { verifySvixSignature } from "@/lib/email/svix";
 import { ingestReply } from "@/lib/email/replies";
 import { htmlToPlainText } from "@/lib/update-content";
@@ -86,6 +87,13 @@ export async function POST(request: Request) {
       });
       if (!ingested) {
         console.warn("[webhooks/inbound] no EmailMessage for token:", token.slice(0, 8));
+      } else {
+        await captureEvent("reply_received", ingested.ownerClerkId, {
+          company_id: ingested.companyId,
+          update_id: ingested.updateId,
+          sentiment: ingested.sentiment,
+          classified_by: ingested.source,
+        });
       }
     }
 

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { badRequest, conflict, handleApi, notFound, ok, parseJson } from "@/lib/api";
 import { requireApiCompany } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { captureEvent } from "@/lib/analytics";
 import { assertWithinLimit } from "@/lib/entitlements";
 import { periodLabel } from "@/lib/format";
 import { isEmptyContent, parseContent } from "@/lib/update-content";
@@ -18,7 +19,7 @@ const bodySchema = z.object({
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   return handleApi(async () => {
-    const { company } = await requireApiCompany();
+    const { user, company } = await requireApiCompany();
     const { id } = await params;
     const body = await parseJson(request, bodySchema);
 
@@ -85,6 +86,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       });
       throw err;
     }
+
+    await captureEvent("update_sent", user.clerkId, {
+      company_id: company.id,
+      update_id: update.id,
+      recipients: investors.length,
+      sent: outcome.sent,
+      failed: outcome.failed,
+      skipped: outcome.skipped,
+      simulated: outcome.simulated,
+      is_retry: Boolean(update.sentAt),
+    });
 
     return ok({
       ...outcome,

@@ -18,6 +18,7 @@
     "@ai-sdk/openai": "^2.0.135",
     "@clerk/nextjs": "^7.9.16",
     "@prisma/client": "^6.19.3",
+    "@sentry/nextjs": "^11.8.0",
     "@tiptap/extensions": "^3.32.0",
     "@tiptap/pm": "^3.32.0",
     "@tiptap/react": "^3.32.0",

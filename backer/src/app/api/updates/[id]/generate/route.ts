@@ -2,6 +2,7 @@ import { z } from "zod";
 import { conflict, handleApi, notFound, ok, parseJson } from "@/lib/api";
 import { requireApiCompany } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { captureEvent } from "@/lib/analytics";
 import { generateDraft } from "@/lib/ai/drafter";
 
 const bodySchema = z.object({
@@ -78,6 +79,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         },
       });
       return next;
+    });
+
+    await captureEvent("draft_generated", user.clerkId, {
+      company_id: company.id,
+      update_id: update.id,
+      ai: result.ai,
+      model: result.model,
+      metrics_used: result.metricsUsed.length,
+      voice_samples_used: result.voiceSamplesUsed,
+      has_notes: Boolean(body.notes),
     });
 
     return ok({

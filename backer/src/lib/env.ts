@@ -67,7 +67,7 @@ export const capabilities = {
   billing: Boolean(env.STRIPE_SECRET_KEY),
   slack: Boolean(env.SLACK_WEBHOOK_URL),
   posthog: Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY),
-  sentry: Boolean(env.SENTRY_DSN),
+  sentry: Boolean(env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN),
 } as const;
 
 export type Capabilities = typeof capabilities;

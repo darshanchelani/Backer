@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { PostHogProvider } from "@/components/analytics/posthog-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -32,10 +33,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const inner = (
-    <TooltipProvider>
-      {children}
-      <Toaster richColors position="top-center" closeButton />
-    </TooltipProvider>
+    <PostHogProvider clerkEnabled={hasClerk}>
+      <TooltipProvider>
+        {children}
+        <Toaster richColors position="top-center" closeButton />
+      </TooltipProvider>
+    </PostHogProvider>
   );
 
   return (

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ApiError, handleApi, ok, parseJson } from "@/lib/api";
 import { requireApiCompany } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { captureEvent } from "@/lib/analytics";
 import { appUrl } from "@/lib/env";
 import { PAID_PLANS, priceIdForPlan, stripeClient } from "@/lib/billing";
 
@@ -55,6 +56,11 @@ export async function POST(request: Request) {
     if (!session.url) {
       throw new ApiError(502, "Stripe didn't return a checkout URL - try again.", "stripe_error");
     }
+
+    await captureEvent("checkout_started", user.clerkId, {
+      company_id: company.id,
+      plan: body.plan,
+    });
 
     return ok({ url: session.url });
   });
