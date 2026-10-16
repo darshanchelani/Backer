@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: backer-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: backer
+      POSTGRES_PASSWORD: backer
+      POSTGRES_DB: backer
+    ports:
+      - "5434:5432"
+    volumes:
+      - backer_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backer -d backer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  backer_pgdata:

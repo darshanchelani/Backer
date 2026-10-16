@@ -1,0 +1,441 @@
+// Backer - Investor Reporting & Comms Hub
+// Schema conventions:
+// - All emails stored lowercase (enforced in app code)
+// - Version content lives in UpdateVersion.content: { wins, metrics, asks, whatsNext }
+// - Connector tokens are AES-256-GCM encrypted at rest (lib/crypto.ts)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────────────────────
+// Enums
+// ────────────────────────────────────────────────────────────────
+
+enum CompanyStage {
+  PRE_SEED
+  SEED
+  SERIES_A
+  SERIES_B_PLUS
+}
+
+enum Cadence {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum Plan {
+  FREE
+  PRO
+  SCALE
+}
+
+enum InvestorType {
+  LEAD
+  FOLLOW_ON
+  BOARD
+  ANGEL
+  OTHER
+}
+
+enum Provider {
+  STRIPE
+  HUBSPOT
+  MIXPANEL
+  MANUAL
+}
+
+enum ConnectionStatus {
+  PENDING
+  ACTIVE
+  ERROR
+  REVOKED
+}
+
+enum MetricKind {
+  // Stripe
+  MRR
+  REVENUE
+  NEW_CUSTOMERS
+  CHURNED_CUSTOMERS
+  REFUNDS
+  // HubSpot
+  PIPELINE_VALUE
+  DEALS_OPEN
+  DEALS_WON
+  // Mixpanel
+  ACTIVE_USERS
+  NEW_SIGNUPS
+  EVENTS_TRACKED
+  // Manual entry
+  BURN
+  CASH_ON_HAND
+  RUNWAY_MONTHS
+}
+
+enum UpdateStatus {
+  DRAFT
+  SENDING
+  SENT
+  FAILED
+}
+
+enum Tone {
+  MATTER_OF_FACT
+  HYPE
+  CAUTIOUS
+}
+
+enum VersionSource {
+  AI_DRAFT
+  AI_REGENERATED
+  FOUNDER_EDIT
+  REMINDER_PREFILL
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  BOUNCED
+  FAILED
+  COMPLAINED
+}
+
+enum EventType {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  REPLIED
+  BOUNCED
+  COMPLAINED
+}
+
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  CONCERNED
+  UNKNOWN
+}
+
+// ────────────────────────────────────────────────────────────────
+// Identity & company
+// ────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company?
+}
+
+model Company {
+  id        String       @id @default(cuid())
+  ownerId   String       @unique
+  owner     User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  stage     CompanyStage
+  website   String?
+  timezone  String       @default("America/Los_Angeles")
+
+  // Sending identity (must be a Resend-verified domain)
+  senderName  String?
+  senderEmail String?
+
+  // Cadence: when the founder wants to send updates
+  cadence          Cadence @default(MONTHLY)
+  cadenceAnchorDay Int? // day-of-month for MONTHLY (1-28), day-of-week 0-6 for WEEKLY/BIWEEKLY; null = from last update + interval
+
+  // Billing
+  plan                 Plan      @default(FREE)
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  stripePriceId        String?
+  planRenewsAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  investors    Investor[]
+  updates      Update[]
+  connections  Connection[]
+  snapshots    MetricSnapshot[]
+  reminders    CadenceReminder[]
+  voiceSamples VoiceSample[]
+
+  @@index([plan])
+}
+
+// ────────────────────────────────────────────────────────────────
+// Investors
+// ────────────────────────────────────────────────────────────────
+
+model Investor {
+  id        String       @id @default(cuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+  firm      String?
+  type      InvestorType @default(OTHER)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  emails  EmailMessage[]
+  events  UpdateEvent[]
+  replies Reply[]
+
+  @@unique([companyId, email])
+  @@index([companyId])
+}
+
+// ────────────────────────────────────────────────────────────────
+// Data connections & metrics
+// ────────────────────────────────────────────────────────────────
+
+model Connection {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider  Provider
+
+  // AES-256-GCM encrypted (lib/crypto.ts)
+  accessTokenEnc  String? @db.Text
+  refreshTokenEnc String? @db.Text
+
+  externalAccountId String? // stripe acct id / hubspot portal id / mixpanel project id
+  accountLabel      String?
+
+  status              ConnectionStatus @default(PENDING)
+  lastSyncedAt        DateTime?
+  lastError           String?
+  lastErrorAt         DateTime?
+  consecutiveFailures Int              @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, provider])
+  @@index([status])
+}
+
+model MetricSnapshot {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  provider    Provider
+  metric      MetricKind
+  value       Float
+  currency    String?
+  unit        String? // "customers", "deals", "users"... display hint
+  periodStart DateTime
+  periodEnd   DateTime
+  capturedAt  DateTime @default(now())
+  raw         Json?
+
+  @@unique([companyId, provider, metric, periodStart])
+  @@index([companyId, metric, periodStart])
+}
+
+// ────────────────────────────────────────────────────────────────
+// Updates (the core object)
+// ────────────────────────────────────────────────────────────────
+
+model Update {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title       String
+  subject     String?
+  periodStart DateTime
+  periodEnd   DateTime
+  status      UpdateStatus @default(DRAFT)
+  tone        Tone         @default(MATTER_OF_FACT)
+
+  // Linear version history: current content = version where version = currentVersion
+  currentVersion Int @default(0)
+
+  // The metric context used when drafting, so a send is always explainable
+  metricsContext Json?
+
+  // Sending identity snapshot (set at send time)
+  fromName  String?
+  fromEmail String?
+  sentAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions  UpdateVersion[]
+  emails    EmailMessage[]
+  events    UpdateEvent[]
+  replies   Reply[]
+  reminders CadenceReminder[]
+
+  @@index([companyId, status])
+  @@index([companyId, sentAt])
+}
+
+model UpdateVersion {
+  id       String @id @default(cuid())
+  updateId String
+  update   Update @relation(fields: [updateId], references: [id], onDelete: Cascade)
+
+  version Int
+  // { wins: string, metrics: string, asks: string, whatsNext: string } - HTML from the editor
+  content Json
+  source  VersionSource
+  tone    Tone?
+  model   String? // which model produced it (null for founder edits)
+  promptMeta Json? // metrics used, voice samples used - for debugging tone quality
+
+  createdBy String? // clerk user id
+  createdAt DateTime @default(now())
+
+  @@unique([updateId, version])
+  @@index([updateId])
+}
+
+// ────────────────────────────────────────────────────────────────
+// Sending & tracking
+// ────────────────────────────────────────────────────────────────
+
+model EmailMessage {
+  id         String   @id @default(cuid())
+  updateId   String
+  update     Update   @relation(fields: [updateId], references: [id], onDelete: Cascade)
+  investorId String
+  investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+
+  providerId String? // resend message id
+  status     EmailStatus @default(QUEUED)
+  error      String?
+
+  // Unguessable token embedded in open pixel / click redirect / reply-to address
+  trackToken String @unique
+
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  bouncedAt    DateTime?
+  bounceReason String?
+
+  openCount    Int       @default(0)
+  clickCount   Int       @default(0)
+  lastOpenedAt DateTime?
+  lastClickedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events  UpdateEvent[]
+  replies Reply[]
+
+  // Idempotency: one send per investor per update
+  @@unique([updateId, investorId])
+  @@index([updateId, status])
+}
+
+model UpdateEvent {
+  id       String @id @default(cuid())
+  updateId String
+  update   Update @relation(fields: [updateId], references: [id], onDelete: Cascade)
+
+  investorId     String?
+  investor       Investor?     @relation(fields: [investorId], references: [id], onDelete: SetNull)
+  emailMessageId String?
+  emailMessage   EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
+
+  type EventType
+  url  String? // for CLICKED
+  userAgent String?
+  ipHash    String? // sha256(ip + IP_HASH_SALT) - raw IPs never stored
+  occurredAt DateTime @default(now())
+
+  @@index([updateId, type])
+  @@index([investorId, type, occurredAt])
+}
+
+model Reply {
+  id       String @id @default(cuid())
+  updateId String
+  update   Update @relation(fields: [updateId], references: [id], onDelete: Cascade)
+
+  investorId     String?
+  investor       Investor?     @relation(fields: [investorId], references: [id], onDelete: SetNull)
+  emailMessageId String?
+  emailMessage   EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
+
+  fromEmail String
+  body      String    @db.Text
+  sentiment Sentiment @default(UNKNOWN)
+  sentimentConfidence Float?
+  sentimentReason     String?
+  raw       Json?
+  receivedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([updateId])
+  @@index([investorId, receivedAt])
+}
+
+// ────────────────────────────────────────────────────────────────
+// Cadence, voice, ops
+// ────────────────────────────────────────────────────────────────
+
+model CadenceReminder {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  updateId  String?
+  update    Update? @relation(fields: [updateId], references: [id], onDelete: SetNull)
+
+  periodStart DateTime
+  periodEnd   DateTime
+  sentAt      DateTime @default(now())
+
+  // Exactly-once reminders per company per period
+  @@unique([companyId, periodStart])
+}
+
+model VoiceSample {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  label   String?
+  content String  @db.Text // a past update the founder wrote, used as a few-shot example
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+}
+
+model WebhookEvent {
+  id         String  @id @default(cuid())
+  provider   String // "resend" | "stripe" | "postmark"
+  externalId String
+  type       String
+  payload    Json
+  processedAt DateTime?
+  error      String?
+  createdAt  DateTime @default(now())
+
+  // Idempotency: providers retry; process each event exactly once
+  @@unique([provider, externalId])
+  @@index([provider, createdAt])
+}
