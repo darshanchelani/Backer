@@ -173,7 +173,7 @@ export function SendClient({
         <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <FlaskConical className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <p className="font-medium">Simulation mode - RESEND_API_KEY isn&apos;t set.</p>
+            <p className="font-medium">Simulation mode - BREVO_API_KEY isn&apos;t set.</p>
             <p className="mt-0.5">
               Sends are recorded locally (opens, clicks, replies all work in demo mode) but no real email leaves your
               machine. Add the key in <code className="rounded bg-amber-100 px-1 py-0.5 text-xs">.env</code> to go

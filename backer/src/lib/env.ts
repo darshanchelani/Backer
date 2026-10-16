@@ -22,9 +22,11 @@ const serverEnvSchema = z.object({
   OPENAI_MODEL_DRAFT: z.string().default("gpt-4o-mini"),
   OPENAI_MODEL_QUALITY: z.string().default("gpt-4o"),
 
-  // Email send + inbound replies
-  RESEND_API_KEY: z.string().optional(),
-  RESEND_WEBHOOK_SECRET: z.string().optional(),
+  // Email send + inbound replies (Brevo)
+  BREVO_API_KEY: z.string().optional(),
+  BREVO_WEBHOOK_SECRET: z.string().optional(),
+  BREVO_SENDER_EMAIL: z.string().optional(),
+  BREVO_SENDER_NAME: z.string().optional(),
   INBOUND_DOMAIN: z.string().optional(),
 
   // Billing
@@ -62,7 +64,7 @@ export const env = parseEnv();
 export const capabilities = {
   clerk: Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY),
   ai: Boolean(env.OPENAI_API_KEY),
-  email: Boolean(env.RESEND_API_KEY),
+  email: Boolean(env.BREVO_API_KEY),
   inbound: Boolean(env.INBOUND_DOMAIN),
   billing: Boolean(env.STRIPE_SECRET_KEY),
   slack: Boolean(env.SLACK_WEBHOOK_URL),

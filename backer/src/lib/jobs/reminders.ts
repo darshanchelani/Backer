@@ -1,6 +1,6 @@
-import { Resend } from "resend";
 import { appUrl, capabilities, env } from "../env";
 import { prisma } from "../db";
+import { sendBrevoEmail } from "../email/brevo";
 import { cadenceLabel, computeNextDue, reminderWindowStart } from "../cadence";
 import { periodLabel } from "../format";
 
@@ -19,11 +19,12 @@ export interface ReminderRunSummary {
  * Exactly-once per window via CadenceReminder's unique constraint.
  */
 export async function runReminders(now = new Date()): Promise<ReminderRunSummary> {
+  const canSend = capabilities.email && Boolean(env.BREVO_SENDER_EMAIL);
   const summary: ReminderRunSummary = {
     companies: 0,
     due: 0,
     remindersSent: 0,
-    simulated: !capabilities.email,
+    simulated: !canSend,
     skipped: [],
   };
 
@@ -40,7 +41,9 @@ export async function runReminders(now = new Date()): Promise<ReminderRunSummary
     },
   });
 
-  const resend = capabilities.email ? new Resend(env.RESEND_API_KEY) : null;
+  if (capabilities.email && !env.BREVO_SENDER_EMAIL) {
+    console.warn("[reminders] BREVO_SENDER_EMAIL isn't set - reminder emails will be simulated.");
+  }
 
   for (const company of companies) {
     summary.companies += 1;
@@ -114,15 +117,14 @@ export async function runReminders(now = new Date()): Promise<ReminderRunSummary
     }: ${draftUrl}\n\nYou're getting this because you set a ${cadenceLabel(company.cadence)} cadence in Backer.`;
 
     try {
-      if (resend) {
-        const { error } = await resend.emails.send({
-          from: env.INBOUND_DOMAIN ? `Backer <reminders@${env.INBOUND_DOMAIN}>` : "Backer <onboarding@resend.dev>",
-          to: [company.owner.email],
+      if (canSend) {
+        await sendBrevoEmail({
+          to: { email: company.owner.email, name: company.owner.name },
+          from: { email: env.BREVO_SENDER_EMAIL!, name: env.BREVO_SENDER_NAME || "Backer" },
           subject,
           html,
           text,
         });
-        if (error) throw new Error(error.message);
       } else {
         console.log(`[reminders] simulated reminder to ${company.owner.email}: ${subject}`);
       }

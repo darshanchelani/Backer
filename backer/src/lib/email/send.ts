@@ -1,9 +1,9 @@
-import { Resend } from "resend";
 import type { Company, Investor, Update } from "@prisma/client";
 import { capabilities, env } from "../env";
 import { prisma } from "../db";
 import { newToken } from "../crypto";
 import type { UpdateContent } from "../update-content";
+import { sendBrevoEmail } from "./brevo";
 import { renderUpdateEmail } from "./template";
 
 export interface SendOutcome {
@@ -18,7 +18,7 @@ const SEND_CONCURRENCY = 8;
 
 /**
  * The send engine. One EmailMessage per investor (the idempotency anchor),
- * per-message error isolation, and a simulated mode when RESEND_API_KEY
+ * per-message error isolation, and a simulated mode when BREVO_API_KEY
  * isn't set so the whole loop stays testable locally.
  */
 export async function sendUpdateToInvestors(opts: {
@@ -31,10 +31,8 @@ export async function sendUpdateToInvestors(opts: {
   const { company, update, subject, content, investors } = opts;
   const fromName = company.senderName ?? company.name;
   const fromEmail = company.senderEmail ?? "";
-  const from = `${fromName} <${fromEmail}>`;
 
   const simulated = !capabilities.email;
-  const resend = capabilities.email ? new Resend(env.RESEND_API_KEY) : null;
 
   const existing = await prisma.emailMessage.findMany({
     where: { updateId: update.id, investorId: { in: investors.map((i) => i.id) } },
@@ -85,7 +83,7 @@ export async function sendUpdateToInvestors(opts: {
     });
 
     try {
-      if (simulated || !resend) {
+      if (simulated) {
         await prisma.$transaction([
           prisma.emailMessage.update({
             where: { id: message.id },
@@ -104,23 +102,20 @@ export async function sendUpdateToInvestors(opts: {
         return;
       }
 
-      const { data, error } = await resend.emails.send({
-        from,
-        to: [investor.email],
+      const { messageId } = await sendBrevoEmail({
+        to: { email: investor.email, name: investor.name },
+        from: { email: fromEmail, name: fromName },
+        replyTo,
         subject,
         html: rendered.html,
         text: rendered.text,
-        replyTo,
+        correlationId: message.id,
       });
-
-      if (error || !data) {
-        throw new Error(error?.message ?? "Resend rejected the message.");
-      }
 
       await prisma.$transaction([
         prisma.emailMessage.update({
           where: { id: message.id },
-          data: { status: "SENT", providerId: data.id, sentAt: new Date() },
+          data: { status: "SENT", providerId: messageId, sentAt: new Date() },
         }),
         prisma.updateEvent.create({
           data: {
