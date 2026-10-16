@@ -97,7 +97,7 @@ export default async function DashboardPage() {
       icon: Users,
     },
     {
-      done: snapshotCount > 0,
+      done: snapshotCount > 0 || connectionCount > 0,
       label: "Connect your metrics",
       hint: "Stripe, HubSpot, Mixpanel - or enter numbers by hand.",
       href: "/metrics",

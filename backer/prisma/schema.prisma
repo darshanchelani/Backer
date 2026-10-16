@@ -219,6 +219,7 @@ model Connection {
 
   externalAccountId String? // stripe acct id / hubspot portal id / mixpanel project id
   accountLabel      String?
+  meta              Json? // connector-specific config (e.g. Mixpanel project + event names)
 
   status              ConnectionStatus @default(PENDING)
   lastSyncedAt        DateTime?

@@ -1,5 +1,5 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 
 /**
  * We deliberately do NOT protect routes by path matching here (Clerk v7
@@ -15,7 +15,7 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 const hasClerk = Boolean(process.env.CLERK_SECRET_KEY && process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
-export default hasClerk ? clerkMiddleware() : (req: NextRequest) => NextResponse.next();
+export default hasClerk ? clerkMiddleware() : () => NextResponse.next();
 
 export const config = {
   matcher: [

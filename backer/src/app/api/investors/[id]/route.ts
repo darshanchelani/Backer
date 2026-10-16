@@ -1,5 +1,4 @@
 import { Prisma } from "@prisma/client";
-import { z } from "zod";
 import { conflict, handleApi, notFound, ok, parseJson } from "@/lib/api";
 import { requireApiCompany } from "@/lib/auth";
 import { prisma } from "@/lib/db";
