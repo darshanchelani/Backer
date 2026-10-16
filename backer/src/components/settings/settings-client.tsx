@@ -398,8 +398,8 @@ export function SettingsClient({
           </div>
           <p className="text-xs text-muted-foreground">
             {capabilities.email
-              ? "This address must be a verified sender in Brevo (Senders, Domains & IPs). Until then, sends will fail."
-              : "BREVO_API_KEY isn't set yet, so sends run in simulation mode. Add it to .env to go live."}
+              ? "The domain of this address must be verified in Resend (Domains > Add domain). Until then, sends will fail."
+              : "RESEND_API_KEY isn't set yet, so sends run in simulation mode. Add it to .env to go live."}
           </p>
           <div className="flex justify-end">
             <Button onClick={() => void saveSender()} disabled={savingSender}>

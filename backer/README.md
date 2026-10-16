@@ -4,7 +4,7 @@
 
 The loop: connect Stripe / HubSpot / Mixpanel → Backer drafts a four-section update (Wins, Metrics, Asks, What's Next) → you edit and send it from your own email → every open, click, and reply is tracked, and replies are classified by sentiment. A cadence engine nudges you when it's time to send again.
 
-Built with Next.js 15 (App Router, TypeScript), Tailwind + shadcn/ui, Postgres + Prisma, Clerk, Brevo, OpenAI, Stripe, PostHog, and Sentry.
+Built with Next.js 15 (App Router, TypeScript), Tailwind + shadcn/ui, Postgres + Prisma, Clerk, Resend, OpenAI, Stripe, PostHog, and Sentry.
 
 ---
 
@@ -48,7 +48,7 @@ The app never breaks on a missing key; it degrades to an honest fallback:
 | Missing | Fallback |
 | --- | --- |
 | `OPENAI_API_KEY` | Drafts are generated from a template instead of AI (same 4-section shape). |
-| `BREVO_API_KEY` | Sends run in **simulation mode** - the full pipeline executes, nothing leaves the server. |
+| `RESEND_API_KEY` | Sends run in **simulation mode** - the full pipeline executes, nothing leaves the server. |
 | `STRIPE_SECRET_KEY` / price IDs | Upgrade buttons are disabled; everyone runs on Free. |
 | `POSTHOG_KEY` / `SENTRY_DSN` | Analytics / error reporting stay dormant. |
 | `SLACK_WEBHOOK_URL` | Connector-health alerts are logged instead of posted. |
@@ -66,14 +66,12 @@ Work through this list when you're ready to send real emails and take real payme
 - Drafts use `gpt-4o-mini` by default; override with `OPENAI_MODEL_DRAFT` (and `OPENAI_MODEL_QUALITY` for future premium paths).
 - Add voice samples in **Settings → Voice samples** - the drafter uses your past writing as few-shot examples, which is the difference between "AI wrote this" and "you wrote this".
 
-### 2. Brevo (sending + tracking + replies)
+### 2. Resend (sending + tracking + replies)
 
-- Create an API key at https://app.brevo.com/settings/keys/api → `BREVO_API_KEY`.
-- Verify your sending domain or individual sender (Senders, Domains & IPs → Domains / Senders). Then set your sending name + address in **Settings → Sending identity** - that address must be a verified sender, or sends will fail.
-- Add the transactional webhook: Brevo → Transactional → Settings → Webhooks → add endpoint `https://your-app.com/api/webhooks/brevo?token=YOUR_BREVO_WEBHOOK_SECRET` (Brevo doesn't sign webhooks, so the URL carries your secret token; set `BREVO_WEBHOOK_SECRET` in `.env` to any random string). Subscribe to the bounce/spam events (`delivered`, `hard_bounce`, `soft_bounce`, `blocked`, `invalid_email`, `spam`). This is what flips messages from `SENT` to `DELIVERED` / `BOUNCED` / `COMPLAINED`.
-- **Replies:** add an inbound-parsing webhook for a reply subdomain (e.g. `reply.yourdomain.com`), then point that subdomain's MX records at Brevo (`inbound1.sendinblue.com` priority 10, `inbound2.sendinblue.com` priority 20) and set `INBOUND_DOMAIN=reply.yourdomain.com`. Outgoing emails get `Reply-To: reply+{token}@reply.yourdomain.com`, replies are ingested via `POST /api/webhooks/inbound?token=YOUR_BREVO_WEBHOOK_SECRET`, and sentiment is classified automatically.
-- Cadence reminder emails (to you, not investors) are sent from `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME` - set those to one of your verified senders.
-- Note: the Brevo free plan allows 300 transactional emails/day; upgrade when your investor list outgrows it.
+- Create a key at https://resend.com/api-keys → `RESEND_API_KEY`.
+- Add and verify your sending domain (Domains → Add domain, then the DNS records). Then set your sending name + address in **Settings → Sending identity**.
+- Add the delivery-events webhook: Resend → Webhooks → add endpoint `https://your-app.com/api/webhooks/resend`, and copy its signing secret (starts with `whsec_`) → `RESEND_WEBHOOK_SECRET`. This is what flips messages from `SENT` to `DELIVERED` / `BOUNCED` / `COMPLAINED`.
+- **Replies:** point a subdomain at Resend Inbound (e.g. `reply.yourdomain.com`, MX records in the Resend dashboard) and set `INBOUND_DOMAIN=reply.yourdomain.com`. Outgoing emails get `Reply-To: reply+{token}@reply.yourdomain.com`, replies are ingested via `POST /api/webhooks/inbound` (same `RESEND_WEBHOOK_SECRET`), and sentiment is classified automatically.
 
 ### 3. Stripe (billing)
 
@@ -106,7 +104,7 @@ On Vercel, crons call these automatically once `CRON_SECRET` is set in the proje
 ### 7. Deploy (Vercel)
 
 1. Push the repo, import it in Vercel, point `DATABASE_URL` at hosted Postgres (Neon/Supabase/RDS), and add every key from `.env.example` to the project env.
-2. Set `NEXT_PUBLIC_APP_URL` to the production URL, and use the production webhook secrets from Brevo/Stripe for the deployed endpoints.
+2. Set `NEXT_PUBLIC_APP_URL` to the production URL, and use the production webhook secrets from Resend/Stripe for the deployed endpoints.
 3. Run `npx prisma migrate deploy` against the production database.
 4. Deploy. Check `/api/cron/health` once manually with your `CRON_SECRET` to confirm everything is wired.
 
@@ -116,7 +114,7 @@ On Vercel, crons call these automatically once `CRON_SECRET` is set in the proje
 
 - **Metrics**: on the Metrics page, use "Load demo data" (dev only) or connect a real Stripe restricted key (`rk_`) / HubSpot private app token (`pat-`) / Mixpanel service account.
 - **Drafts**: without an OpenAI key you still get a template draft; with one, add voice samples first for the real thing.
-- **Sends**: without `BREVO_API_KEY`, sending is simulated - email messages, open/click tracking, and the report all behave exactly as in production (tracking links work: open the "sent" record's tracking pixel or click a button URL from the report).
+- **Sends**: without `RESEND_API_KEY`, sending is simulated - email messages, open/click tracking, and the report all behave exactly as in production (tracking links work: open the "sent" record's tracking pixel or click a button URL from the report).
 - **Replies**: the report page has a "Simulate reply" action (dev only) that runs the real ingest + sentiment path.
 
 ## Plans & limits

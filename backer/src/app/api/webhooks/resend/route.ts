@@ -1,49 +1,53 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
+import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
-import { checkWebhookToken } from "@/lib/email/webhook-token";
+import { verifySvixSignature } from "@/lib/email/svix";
 
-interface BrevoEvent {
-  event?: string;
-  email?: string;
-  id?: number;
-  "message-id"?: string;
-  ts_event?: number;
-  reason?: string;
-  "X-Mailin-custom"?: string;
+interface ResendEvent {
+  type?: string;
+  data?: {
+    email_id?: string;
+    to?: string | string[];
+    bounce?: { message?: string; type?: string };
+  };
 }
 
 /**
- * Brevo transactional webhooks: delivered / bounced / spam.
- *
- * Brevo doesn't sign webhooks, so the URL carries a secret token
- * (`?token=...`). Idempotent via WebhookEvent, and per-event error tracking
+ * Resend delivery webhooks: delivered / bounced / complained.
+ * Svix-signed, idempotent via WebhookEvent, and per-event error tracking
  * so a poison event is visible instead of retrying forever.
  */
 export async function POST(request: Request) {
-  const auth = checkWebhookToken(request);
-  if (!auth.configured && process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Webhook secret not configured." }, { status: 503 });
-  }
-  if (auth.configured && !auth.ok) {
-    return NextResponse.json({ error: "Invalid token." }, { status: 401 });
-  }
-
   const payload = await request.text();
 
-  let event: BrevoEvent;
+  if (!env.RESEND_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: "Webhook secret not configured." }, { status: 503 });
+  }
+
+  const valid = verifySvixSignature({
+    payload,
+    secret: env.RESEND_WEBHOOK_SECRET,
+    id: request.headers.get("svix-id"),
+    timestamp: request.headers.get("svix-timestamp"),
+    signatureHeader: request.headers.get("svix-signature"),
+  });
+  if (!valid) {
+    return NextResponse.json({ error: "Invalid signature." }, { status: 401 });
+  }
+
+  let event: ResendEvent;
   try {
-    event = JSON.parse(payload) as BrevoEvent;
+    event = JSON.parse(payload) as ResendEvent;
   } catch {
     return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
   }
 
-  const externalId = `${event.event ?? "unknown"}:${event["message-id"] ?? event.email ?? "unknown"}:${
-    event.ts_event ?? "0"
-  }`;
+  const externalId =
+    request.headers.get("svix-id") ?? `${event.type ?? "unknown"}:${event.data?.email_id ?? "unknown"}`;
 
   const existing = await prisma.webhookEvent.findUnique({
-    where: { provider_externalId: { provider: "brevo", externalId } },
+    where: { provider_externalId: { provider: "resend", externalId } },
   });
   if (existing) {
     return NextResponse.json({ ok: true, duplicate: true });
@@ -51,9 +55,9 @@ export async function POST(request: Request) {
 
   const record = await prisma.webhookEvent.create({
     data: {
-      provider: "brevo",
+      provider: "resend",
       externalId,
-      type: event.event ?? "unknown",
+      type: event.type ?? "unknown",
       payload: event as unknown as Prisma.InputJsonValue,
     },
   });
@@ -72,16 +76,17 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
-async function handleEvent(event: BrevoEvent): Promise<void> {
-  if (!event.event) return;
+async function handleEvent(event: ResendEvent): Promise<void> {
+  const providerId = event.data?.email_id;
+  if (!providerId || !event.type) return;
 
-  const message = await findMessage(event);
+  const message = await prisma.emailMessage.findFirst({ where: { providerId } });
   if (!message) return; // not one of ours (or a provider id from another env)
 
   const now = new Date();
 
-  switch (event.event) {
-    case "delivered": {
+  switch (event.type) {
+    case "email.delivered": {
       await prisma.$transaction([
         prisma.emailMessage.update({
           where: { id: message.id },
@@ -98,18 +103,14 @@ async function handleEvent(event: BrevoEvent): Promise<void> {
       ]);
       return;
     }
-    case "hard_bounce":
-    case "soft_bounce":
-    case "invalid_email":
-    case "blocked":
-    case "error": {
+    case "email.bounced": {
       await prisma.$transaction([
         prisma.emailMessage.update({
           where: { id: message.id },
           data: {
             status: "BOUNCED",
             bouncedAt: now,
-            bounceReason: (event.reason ?? `Brevo: ${event.event}`).slice(0, 500),
+            bounceReason: (event.data?.bounce?.message ?? "Bounced").slice(0, 500),
           },
         }),
         prisma.updateEvent.create({
@@ -123,7 +124,7 @@ async function handleEvent(event: BrevoEvent): Promise<void> {
       ]);
       return;
     }
-    case "spam": {
+    case "email.complained": {
       await prisma.$transaction([
         prisma.emailMessage.update({ where: { id: message.id }, data: { status: "COMPLAINED" } }),
         prisma.updateEvent.create({
@@ -138,29 +139,6 @@ async function handleEvent(event: BrevoEvent): Promise<void> {
       return;
     }
     default:
-      return; // request / opened / click / deferred / unsubscribed - recorded, no state change
+      return; // sent / delivery_delayed / etc - recorded in WebhookEvent, no state change
   }
-}
-
-/**
- * Match the webhook back to our EmailMessage: first by the X-Mailin-custom
- * correlation id we set at send time, then by provider message id (Brevo
- * reports it with or without angle brackets depending on the event).
- */
-async function findMessage(event: BrevoEvent) {
-  const correlationId = event["X-Mailin-custom"];
-  if (correlationId) {
-    const byCorrelation = await prisma.emailMessage.findUnique({ where: { id: correlationId } });
-    if (byCorrelation) return byCorrelation;
-  }
-
-  const messageId = event["message-id"];
-  if (!messageId) return null;
-
-  const normalized = messageId.replace(/[<>]/g, "");
-  return prisma.emailMessage.findFirst({
-    where: {
-      OR: [{ providerId: messageId }, { providerId: normalized }, { providerId: `<${normalized}>` }],
-    },
-  });
 }

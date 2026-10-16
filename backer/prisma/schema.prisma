@@ -324,7 +324,7 @@ model EmailMessage {
   investorId String
   investor   Investor @relation(fields: [investorId], references: [id], onDelete: Cascade)
 
-  providerId String? // provider message id (Brevo)
+  providerId String? // resend message id
   status     EmailStatus @default(QUEUED)
   error      String?
 
@@ -428,7 +428,7 @@ model VoiceSample {
 
 model WebhookEvent {
   id         String  @id @default(cuid())
-  provider   String // "brevo" | "stripe"
+  provider   String // "resend" | "stripe" | "postmark"
   externalId String
   type       String
   payload    Json
