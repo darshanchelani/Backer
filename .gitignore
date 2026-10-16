@@ -34,3 +34,6 @@ coverage/
 
 # sentry
 .sentryclirc
+
+# internal docs
+Project.docx
